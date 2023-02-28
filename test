@@ -1,0 +1,71 @@
+private void geoUpdate(Message<Object> request) {
+        JsonObject requestJson = (JsonObject) request.body();
+        WebClient client = WebClient.create(getVertx());
+        final List<String> updatedMerIDsInPrimaryList = requestJson.getJsonArray("updatedMerIDsInPrimary").getList();
+
+        JsonObject requestPayload = new JsonObject();
+        JsonArray result = new JsonArray();
+
+
+        List<Object> collect = requestJson.getJsonObject("updateRequest").getJsonArray("updateMerchants").stream()
+                .filter(e -> updatedMerIDsInPrimaryList.contains(((JsonObject) e).getString("merId"))).collect(Collectors.toList());
+
+        List<Future> futures = new ArrayList<>();
+        collect
+                .forEach(e -> {
+
+
+                            JsonObject item = (JsonObject) e;
+                            String address = item.getString("addressLine1") + item.getString("addressLine2")
+                                    + item.getString("addressLine3") + item.getString("addressLine4") + item.getString("addressLine5");
+                            Future<JsonObject> future = Future.future();
+                            client.getAbs("https://locateus-qa.aexp.com/bigdata/v1/geocoder/getgeocode")
+                                    .setQueryParam("address", address)
+                                    .setQueryParam("city", item.getString("city"))
+                                    .setQueryParam("state", item.getString("cntryCd"))
+                                    .setQueryParam("zip", item.getString("zip"))
+                                    .setQueryParam("client_id", "CRMD")
+                                    .setQueryParam("ctry", item.getString("cntryCd")).send(geoResponse -> {
+                                        if (geoResponse.succeeded() && geoResponse.result().statusCode() == 200) {
+                                            JsonObject body = geoResponse.result().bodyAsJsonObject().getJsonArray("locusGeoResponse").getJsonObject(0);
+                                            JsonObject data = new JsonObject()
+                                                    .put("lat", body.getString("geo_lat"))
+                                                    .put("longt", body.getString("geo_long"))
+                                                    .put("merId", item.getString("merId"));
+                                            future.complete(data);
+                                        } else {
+                                            future.fail(geoResponse.cause());
+                                        }
+                                    });
+                            futures.add(future);
+
+                        }
+                );
+        final JsonObject[] requestPayLoad = new JsonObject[1];
+        CompositeFuture.all(futures).setHandler(ar -> {
+            JsonArray jsonArray = new JsonArray();
+            if (ar.succeeded()) {
+                ar.result().list().forEach(res -> {
+                    jsonArray.add(res);
+                });
+            } else {
+                LOGGER.error("error while doing geo Update : " + ar.cause());
+            }
+            requestPayLoad[0] = new JsonObject().put("updateMerchants", jsonArray);
+            LOGGER.info("request Payload for Locus update : " + requestPayLoad[0]);
+            client.put(vertx.getOrCreateContext().config().getInteger("port"), "localhost", "/merchant/v1/merchantIds/")
+                    .putHeader("consumerId", "CRMD_PublicProfile")
+                    .sendJsonObject(requestPayLoad[0], ar1 -> {
+                        if (ar1.succeeded()) {
+                            System.out.println(ar1.result());
+                            HttpResponseImpl imp= (HttpResponseImpl) ar1.result();
+                            HttpResponse<Buffer> response = ar1.result();
+                            System.out.println("Status code" + response.statusCode());
+                        } else {
+                            LOGGER.error("Error while update :: " + ar1.cause());
+                        }
+                    });
+        });
+
+
+    }
