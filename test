@@ -184,3 +184,54 @@ public class GeoUpdateTest {
                 .send(testContext.succeeding(response -> testContext.verify(() -> {
                     assertEquals(200
 
+
+
+
+package chapter3.local;
+
+import io.vertx.core.json.JsonArray;
+import io.vertx.core.json.JsonObject;
+
+import java.util.Arrays;
+import java.util.List;
+import java.util.Set;
+import java.util.function.Predicate;
+import java.util.stream.Collectors;
+
+public class Test {
+
+  public static void main(String[] args) {
+
+    JsonArray jsonArray = new JsonArray();
+    jsonArray.add(new JsonObject("{\"merId\":\"0313001203\",\"crmAdLine4\":\"KINGSTON18\",\"crmAdLine5\":\"ABINGDON18\"}"));
+    jsonArray.add(new JsonObject("{\"merId\":\"0313001204\",\"crmAdLine4\":\"KINGSTON18\",\"crmAdLine5\":\"ABINGDON18\"}"));
+    jsonArray.add(new JsonObject("{\"merId\":\"0313001205\",\"crmAdLine4\":\"KINGSTON18\",\"crmAdLine5\":\"ABINGDON18\"}"));
+    jsonArray.add(new JsonObject("{\"merId\":\"8441308517\",\"crmAdLine4\":\"KINGSTON18\",\"crmAdLine5\":\"ABINGDON18\"}"));
+    jsonArray.add(new JsonObject("{\"merId\":\"8441308517\",\"cntryCd\":\"KINGSTON18\",\"addressLine\":\"try\",\"latd\":\"testing\",\"longtd\":\"testing\",\"regionCd\":\"12123\",\"zip\":\"ABINGDON18\"}"));
+    List<String> updateMerIDs = Arrays.asList("8441308517","8441308518");
+    JsonObject reqPayloadJson = new JsonObject();
+    reqPayloadJson.put("merchantToBeUpdated", jsonArray);
+    reqPayloadJson.put("updatedMerIDsInPrimary", updateMerIDs);
+
+    validate(reqPayloadJson);
+
+
+  }
+
+  static List<Object> validate(JsonObject json)
+  {
+    JsonArray merchantToBeUpdated = json.getJsonArray("merchantToBeUpdated");
+    List updateMerIDs = json.getJsonArray("updatedMerIDsInPrimary").getList();
+    List<Object> merId = merchantToBeUpdated.stream()
+      .filter(e -> updateMerIDs.contains(((JsonObject) e).getString("merId")))
+      .filter(e -> {
+        Set<String> fieldNames = ((JsonObject) e).fieldNames();
+        Predicate<String> addressLine = f -> f.contains("addressLine");
+        return !fieldNames.contains("lat") && !fieldNames.contains("longt") && fieldNames.stream().anyMatch(addressLine) && fieldNames.containsAll(Arrays.asList("cntryCd", "zip", "regionCd"));
+      })
+      .collect(Collectors.toList());
+    System.out.println(merId);
+    return updateMerIDs;
+  }
+}
+
