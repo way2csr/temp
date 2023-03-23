@@ -1,0 +1,271 @@
+package com.aexp.crmd.couchbaseingest.batchwriter;
+
+import static com.couchbase.client.java.util.retry.RetryBuilder.anyOf;
+
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.concurrent.TimeUnit;
+import java.util.stream.Collectors;
+
+import com.aexp.crmd.couchbaseingest.utils.BDPVaultReader;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.batch.core.ExitStatus;
+import org.springframework.batch.core.StepExecution;
+import org.springframework.batch.core.StepExecutionListener;
+import org.springframework.batch.item.ItemWriter;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.stereotype.Component;
+
+import com.couchbase.client.core.BackpressureException;
+import com.couchbase.client.core.RequestCancelledException;
+import com.couchbase.client.core.time.Delay;
+import com.couchbase.client.java.Bucket;
+import com.couchbase.client.java.Cluster;
+import com.couchbase.client.java.CouchbaseCluster;
+import com.couchbase.client.java.document.JsonDocument;
+import com.couchbase.client.java.error.TemporaryFailureException;
+import com.couchbase.client.java.error.TemporaryLockFailureException;
+import com.couchbase.client.java.util.retry.RetryBuilder;
+import com.ulisesbocchio.jasyptspringboot.EncryptablePropertyResolver;
+
+import rx.Observable;
+import rx.Subscriber;
+import rx.functions.Func1;
+
+/**
+ * 
+ * @author ssund53
+ *
+ *         This class is to write into CRMD bucket
+ */
+
+@Component
+public class CrmdBatchWriter implements ItemWriter<JsonDocument>, StepExecutionListener {
+
+	private static Logger logger = LoggerFactory.getLogger(CrmdBatchWriter.class);
+
+	private Bucket bucket;
+	
+	private Bucket failoverBucket;
+
+	private Cluster cluster = null;
+	
+	private Cluster failoverCluster = null;
+	
+	private boolean isFailoverEnabled = false;
+	
+	private boolean isFailedOver = false;
+	
+	private String bucketName;
+	private String clusterName;
+	private String clusterPassword;
+	private String failoverClusterName;
+	private String failoverClusterPassword;
+	
+	private StepExecution stepExecution;
+	
+	private List<String> rejectedUpdates = new ArrayList<>();
+
+	@Autowired
+	private BDPVaultReader bcpVaultReader;
+
+	@Autowired
+	/*public CrmdBatchWriter(@Value("#{'${primary.couchBaseNodesList}'.split(',')}") List<String> couchBaseNodesList,
+			@Value("${primary.clusterName}") String clusterName, *//*@Value("${primary.clusterPassword}") *//*String clusterPassword,@Value("${failoverEnabled}") boolean isFailoverEnabled,
+			@Value("#{'${failover.couchBaseNodesList}'.split(',')}") List<String> failoverCouchBaseNodesList, 
+			@Value("${failover.clusterName}") String failoverClusterName,*//* @Value("${failover.clusterPassword}")*//* String failoverClusterPassword,
+			@Value("${crmdBucketName}") String bucketName,EncryptablePropertyResolver encryptablePropertyResolver ) {
+
+		*/
+		public CrmdBatchWriter(@Value("${primary.couchBaseNodesList}") String couchBaseNodesList,
+				@Value("${primary.clusterName}") String clusterName, String clusterPassword,@Value("${failoverEnabled}") boolean isFailoverEnabled,
+		@Value("${failover.couchBaseNodesList}") String failoverCouchBaseNodesList,
+		@Value("${failover.clusterName}") String failoverClusterName,String failoverClusterPassword,
+				@Value("${crmdBucketName}") String bucketName,EncryptablePropertyResolver encryptablePropertyResolver ) {
+
+			logger.info("<<<<<<<<<<<<<<<inside batch writer >>>>>>>>>>> "+clusterName);
+		this.bucketName = bucketName;
+		this.clusterName = clusterName;
+		this.clusterPassword = encryptablePropertyResolver.resolvePropertyValue(bcpVaultReader.getClusterPassword());
+		logger.info("<<<<<<<<<<<<<<<clusterPassword >>>>>>>>>>> "+this.clusterPassword);
+		this.failoverClusterName = failoverClusterName;
+		this.failoverClusterPassword = encryptablePropertyResolver.resolvePropertyValue(bcpVaultReader.getFailoverClusterPassword());
+		logger.info("<<<<<<<<<<<<<<<failoverClusterPassword >>>>>>>>>>> "+this.failoverClusterPassword);
+		cluster = CouchbaseCluster.create(couchBaseNodesList);
+		cluster.authenticate(clusterName,this.clusterPassword);
+		bucket = cluster.openBucket(bucketName);
+		this.isFailoverEnabled = isFailoverEnabled;
+		if(isFailoverEnabled) {
+			failoverCluster = CouchbaseCluster.create(failoverCouchBaseNodesList);
+			failoverCluster.authenticate(failoverClusterName,this.failoverClusterPassword);
+			failoverBucket = failoverCluster.openBucket(bucketName);
+		}
+
+	}
+
+	/**
+	 * couch base bulk inserting method using reactive 
+	 */
+	@Override
+	public void write(List<? extends JsonDocument> docList) throws Exception {
+		
+		if(!bucket.isClosed()) {
+			isFailedOver = false;
+		}
+		
+		if(isFailoverEnabled && isFailedOver) {
+			write(docList, false);
+		} else {
+			write(docList, true);
+		}
+	}
+
+	private void write(List<? extends JsonDocument> docList, boolean isPrimary) {
+		if(!isPrimary) {
+			String merIds = docList.stream().map(d->d.content().getString("merId")).collect(Collectors.joining(","));
+			logger.info("Updating following merchants in failover cluster: "+ merIds);
+		}
+		Observable.from(docList).flatMap(getExistingDocument(isPrimary)).flatMap(m -> updateDocument(m, isPrimary)).last().toBlocking()
+			.subscribe(subscribeChunkCompletion(docList,isPrimary));
+	}
+	
+	private Subscriber<JsonDocument> subscribeChunkCompletion(List<? extends JsonDocument> docList, boolean isPrimary) {
+		String primaryFailover = isPrimary? "primary" : "failover";
+		return new Subscriber<JsonDocument>() {
+			
+			@Override
+			public void onCompleted() {
+				logger.debug("Batch chunk execution is completed on " + primaryFailover + " cluster");
+			}
+	
+			@Override
+			public void onError(Throwable arg0) {
+				logger.error("an error occured on "+primaryFailover+" cluster while processing chunk: " 
+							+ docList.stream().map(JsonDocument::id).collect(Collectors.joining(","))
+							+ " ,errorMessage: " + arg0.getMessage());
+				
+				if(isPrimary && isFailoverEnabled) {
+					isFailedOver = true;
+					write(docList, false);
+					
+					/* TODO:Should we let failover cluster to be used till the end?
+					cluster.authenticate(clusterName,clusterPassword);
+					bucket = cluster.openBucket(bucketName);
+					if(!bucket.isClosed()) {
+						isFailedOver = false;
+					}*/
+				}else {
+					throw new RuntimeException(arg0.getMessage());
+				}
+			}
+	
+			@Override
+			public void onNext(JsonDocument arg0) {
+	
+			}
+		};
+	}
+
+
+	private Func1<JsonDocument, Observable<Map<JsonDocument, JsonDocument>>> getExistingDocument(boolean isPrimary) {
+		
+		Bucket bucket = isPrimary? this.bucket : failoverBucket;
+		String primaryFailover = isPrimary? "primary" : "failover";
+		return new Func1<JsonDocument, Observable<Map<JsonDocument, JsonDocument>>>() {
+
+			@Override
+			public Observable<Map<JsonDocument, JsonDocument>> call(JsonDocument document) {
+				try {
+					return bucket.async().getAndLock(document, 30).retryWhen(anyOf(TemporaryLockFailureException.class, TemporaryFailureException.class, RequestCancelledException.class)
+			                .max(3)
+			                .delay(Delay.fixed(100, TimeUnit.MILLISECONDS)).build())
+							.defaultIfEmpty(null).map(existingJsonDocument -> {
+								Map<JsonDocument, JsonDocument> m = new HashMap<>();
+								m.put(document, existingJsonDocument);
+								return m;
+					});
+				} catch (Exception e) {
+					logger.error("Exception occured while getting document from "+primaryFailover+" cluster, id: "+ document.id() + " ,errorMessage: " + e.getMessage());
+					return Observable.error(e);
+				}
+			}
+		};
+	}
+	
+	private Observable<? extends JsonDocument> updateDocument(Map<JsonDocument,JsonDocument> m,boolean isPrimary) {
+		try {
+			Bucket bucket = isPrimary ? this.bucket : failoverBucket;
+			JsonDocument document = (JsonDocument)m.keySet().toArray()[0];
+			JsonDocument existingJsonDocument = (JsonDocument)m.values().toArray()[0];
+			if(document != null) {
+				if(document.content().getString("lastUpdatedTimestamp") != null) {
+					if(existingJsonDocument != null) {
+						long existingDocTimestamp =  existingJsonDocument.content().getString("lastUpdatedTimestamp") != null ? 
+								Long.valueOf(existingJsonDocument.content().getString("lastUpdatedTimestamp")):0;
+						long batchDocTimestamp = Long.valueOf(document.content().getString("lastUpdatedTimestamp"));
+						
+						if(batchDocTimestamp >= existingDocTimestamp) {
+							return replaceDocument(bucket, document, existingJsonDocument);
+						}
+						if(!stepExecution.getExecutionContext().containsKey("rejectedUpdateCount")) {
+							stepExecution.getExecutionContext().putLong("rejectedUpdateCount", 0);
+							stepExecution.getExecutionContext().put("rejectedUpdateIds", new ArrayList<String>());
+						}
+						if(stepExecution.getExecutionContext().get("rejectedUpdateCount") != null) {
+							long rejectedUpdateCount = stepExecution.getExecutionContext().getLong("rejectedUpdateCount"); 
+							List<String> rejectedUpdateIds = (List<String>)stepExecution.getExecutionContext().get("rejectedUpdateIds"); 
+							rejectedUpdateIds.add(document.id());
+							stepExecution.getExecutionContext().put("rejectedUpdateCount", rejectedUpdateCount + 1);
+							stepExecution.getExecutionContext().put("rejectedUpdateIds", rejectedUpdateIds);
+						}else {
+							stepExecution.getExecutionContext().putLong("rejectedUpdateCount", 0);
+							stepExecution.getExecutionContext().put("rejectedUpdateIds", new ArrayList<String>());
+						}
+						
+						return Observable.just(document);
+					}else {
+						return upsertDocument(bucket, document);
+					}
+				}
+			}
+			return Observable.error(new RuntimeException("Error while updating document: "+ document.id()));
+		}catch (Throwable e) {
+			return Observable.error(e);
+		}
+	}
+
+	private Observable<? extends JsonDocument> upsertDocument(Bucket bucket, JsonDocument document) {
+		return bucket.async().upsert(document).retryWhen(RetryBuilder.anyOf(BackpressureException.class)
+				.delay(Delay.exponential(TimeUnit.MICROSECONDS, 100)).max(10).build())
+				.retryWhen(anyOf(TemporaryFailureException.class, RequestCancelledException.class)
+		                .max(3)
+		                .delay(Delay.fixed(100, TimeUnit.MILLISECONDS)).build());
+	}
+
+	private Observable<? extends JsonDocument> replaceDocument(Bucket bucket, JsonDocument document,
+			JsonDocument existingJsonDocument) {
+		JsonDocument newDocument;
+		newDocument = JsonDocument.create(document.id(), document.content(), existingJsonDocument.cas());
+		return bucket.async().replace(newDocument).retryWhen(RetryBuilder.anyOf(BackpressureException.class)
+				.delay(Delay.exponential(TimeUnit.MICROSECONDS, 100)).max(10).build())
+				.retryWhen(anyOf(TemporaryFailureException.class, RequestCancelledException.class)
+		                .max(3)
+		                .delay(Delay.fixed(100, TimeUnit.MILLISECONDS)).build());
+	}
+
+	@Override
+	public void beforeStep(StepExecution stepExecution) {
+		this.stepExecution = stepExecution;
+		
+	}
+
+	@Override
+	public ExitStatus afterStep(StepExecution stepExecution) {
+		return stepExecution.getExitStatus();
+	}
+
+}
