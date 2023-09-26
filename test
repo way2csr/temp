@@ -1,237 +1,31 @@
-private void geoUpdate(Message<Object> request) {
-        JsonObject requestJson = (JsonObject) request.body();
-        WebClient client = WebClient.create(getVertx());
-        final List<String> updatedMerIDsInPrimaryList = requestJson.getJsonArray("updatedMerIDsInPrimary").getList();
+package com.fisglobal.CTI_TransferData.model;
 
-        JsonObject requestPayload = new JsonObject();
-        JsonArray result = new JsonArray();
+import lombok.Getter;
+import lombok.Setter;
+import lombok.ToString;
 
+import javax.validation.constraints.NotBlank;
+import javax.validation.constraints.NotNull;
 
-        List<Object> collect = requestJson.getJsonObject("updateRequest").getJsonArray("updateMerchants").stream()
-                .filter(e -> updatedMerIDsInPrimaryList.contains(((JsonObject) e).getString("merId"))).collect(Collectors.toList());
+@Getter
+@Setter
+@ToString
+public class CTITransferDataRequest {
 
-        List<Future> futures = new ArrayList<>();
-        collect
-                .forEach(e -> {
+    @NotBlank(message="ivrInteractionId cannot be blank")
+    @NotNull(message="ivrInteractionId cannot be null")
+    private String ivrInteractionId;
 
+    private String acdInteractionId;
 
-                            JsonObject item = (JsonObject) e;
-                            String address = item.getString("addressLine1") + item.getString("addressLine2")
-                                    + item.getString("addressLine3") + item.getString("addressLine4") + item.getString("addressLine5");
-                            Future<JsonObject> future = Future.future();
-                            client.getAbs("https://locateus-qa.aexp.com/bigdata/v1/geocoder/getgeocode")
-                                    .setQueryParam("address", address)
-                                    .setQueryParam("city", item.getString("city"))
-                                    .setQueryParam("state", item.getString("cntryCd"))
-                                    .setQueryParam("zip", item.getString("zip"))
-                                    .setQueryParam("client_id", "CRMD")
-                                    .setQueryParam("ctry", item.getString("cntryCd")).send(geoResponse -> {
-                                        if (geoResponse.succeeded() && geoResponse.result().statusCode() == 200) {
-                                            JsonObject body = geoResponse.result().bodyAsJsonObject().getJsonArray("locusGeoResponse").getJsonObject(0);
-                                            JsonObject data = new JsonObject()
-                                                    .put("lat", body.getString("geo_lat"))
-                                                    .put("longt", body.getString("geo_long"))
-                                                    .put("merId", item.getString("merId"));
-                                            future.complete(data);
-                                        } else {
-                                            future.fail(geoResponse.cause());
-                                        }
-                                    });
-                            futures.add(future);
+    private MerchantAuthJson merchantAuthJson;
 
-                        }
-                );
-        final JsonObject[] requestPayLoad = new JsonObject[1];
-        CompositeFuture.all(futures).setHandler(ar -> {
-            JsonArray jsonArray = new JsonArray();
-            if (ar.succeeded()) {
-                ar.result().list().forEach(res -> {
-                    jsonArray.add(res);
-                });
-            } else {
-                LOGGER.error("error while doing geo Update : " + ar.cause());
-            }
-            requestPayLoad[0] = new JsonObject().put("updateMerchants", jsonArray);
-            LOGGER.info("request Payload for Locus update : " + requestPayLoad[0]);
-            client.put(vertx.getOrCreateContext().config().getInteger("port"), "localhost", "/merchant/v1/merchantIds/")
-                    .putHeader("consumerId", "CRMD_PublicProfile")
-                    .sendJsonObject(requestPayLoad[0], ar1 -> {
-                        if (ar1.succeeded()) {
-                            System.out.println(ar1.result());
-                            HttpResponseImpl imp= (HttpResponseImpl) ar1.result();
-                            HttpResponse<Buffer> response = ar1.result();
-                            System.out.println("Status code" + response.statusCode());
-                        } else {
-                            LOGGER.error("Error while update :: " + ar1.cause());
-                        }
-                    });
-        });
+    private CTIDataJson ctiDataJson;
 
+    private String targetNLPInteractionId;
 
-    }
-    
-    
-    
-    --------
-    import io.vertx.core.Vertx;
-import io.vertx.core.http.HttpServer;
-import io.vertx.core.json.JsonArray;
-import io.vertx.core.json.JsonObject;
-import io.vertx.ext.web.client.WebClient;
-import io.vertx.junit5.VertxExtension;
-import io.vertx.junit5.VertxTestContext;
-import org.junit.jupiter.api.*;
-import org.junit.jupiter.api.extension.ExtendWith;
+    private String iscCode;
 
-import java.util.concurrent.TimeUnit;
+    private String createdBy;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertNotNull;
-
-@ExtendWith(VertxExtension.class)
-public class GeoUpdateTest {
-
-    private static final int TEST_SERVER_PORT = 8080;
-    private static final String TEST_SERVER_HOST = "localhost";
-    private HttpServer testServer;
-    private WebClient client;
-
-    @BeforeEach
-    void setUp(Vertx vertx, VertxTestContext testContext) throws Exception {
-        client = WebClient.create(vertx);
-        testServer = vertx.createHttpServer()
-                .requestHandler(request -> {
-                    request.bodyHandler(buffer -> {
-                        JsonObject requestBody = buffer.toJsonObject();
-                        JsonArray updateMerchants = requestBody.getJsonArray("updateMerchants");
-                        assertNotNull(updateMerchants);
-                        assertEquals(1, updateMerchants.size());
-                        JsonObject updateMerchant = updateMerchants.getJsonObject(0);
-                        assertNotNull(updateMerchant.getString("merId"));
-                        assertNotNull(updateMerchant.getString("lat"));
-                        assertNotNull(updateMerchant.getString("longt"));
-                        request.response().setStatusCode(200).end();
-                    });
-                })
-                .listen(TEST_SERVER_PORT, testContext.succeeding(server -> testContext.completeNow()));
-    }
-
-    @AfterEach
-    void tearDown(VertxTestContext testContext) {
-        testServer.close(testContext.succeedingThenComplete());
-    }
-
-    @Test
-    void testGeoUpdate(Vertx vertx, VertxTestContext testContext) throws Exception {
-        // Prepare test data
-        JsonObject requestPayload = new JsonObject()
-                .put("updatedMerIDsInPrimary", new JsonArray().add("1"))
-                .put("updateRequest", new JsonObject()
-                        .put("updateMerchants", new JsonArray()
-                                .add(new JsonObject()
-                                        .put("merId", "1")
-                                        .put("addressLine1", "123 Main St.")
-                                        .put("addressLine2", "Apt. 4")
-                                        .put("addressLine3", null)
-                                        .put("addressLine4", null)
-                                        .put("addressLine5", null)
-                                        .put("city", "Anytown")
-                                        .put("cntryCd", "US")
-                                        .put("zip", "12345")
-                                )
-                        )
-                );
-
-        // Call the geoUpdate method
-        GeoUpdateService geoUpdateService = new GeoUpdateService();
-        geoUpdateService.geoUpdate(new Message<Object>() {
-            @Override
-            public Object body() {
-                return requestPayload;
-            }
-
-            @Override
-            public JsonObject headers() {
-                return new JsonObject();
-            }
-
-            @Override
-            public String address() {
-                return null;
-            }
-
-            @Override
-            public String replyAddress() {
-                return null;
-            }
-
-            @Override
-            public boolean send() {
-                return false;
-            }
-
-            @Override
-            public Message<Object> copy() {
-                return null;
-            }
-        });
-
-        // Wait for the test server to receive and process the request
-        testContext.awaitCompletion(5, TimeUnit.SECONDS);
-
-        // Assert that the request was processed successfully
-        client.get(TEST_SERVER_PORT, TEST_SERVER_HOST, "/")
-                .send(testContext.succeeding(response -> testContext.verify(() -> {
-                    assertEquals(200
-
-
-
-
-package chapter3.local;
-
-import io.vertx.core.json.JsonArray;
-import io.vertx.core.json.JsonObject;
-
-import java.util.Arrays;
-import java.util.List;
-import java.util.Set;
-import java.util.function.Predicate;
-import java.util.stream.Collectors;
-
-public class Test {
-
-  public static void main(String[] args) {
-
-    JsonArray jsonArray = new JsonArray();
-    jsonArray.add(new JsonObject("{\"merId\":\"0313001203\",\"crmAdLine4\":\"KINGSTON18\",\"crmAdLine5\":\"ABINGDON18\"}"));
-    jsonArray.add(new JsonObject("{\"merId\":\"0313001204\",\"crmAdLine4\":\"KINGSTON18\",\"crmAdLine5\":\"ABINGDON18\"}"));
-    jsonArray.add(new JsonObject("{\"merId\":\"0313001205\",\"crmAdLine4\":\"KINGSTON18\",\"crmAdLine5\":\"ABINGDON18\"}"));
-    jsonArray.add(new JsonObject("{\"merId\":\"8441308517\",\"crmAdLine4\":\"KINGSTON18\",\"crmAdLine5\":\"ABINGDON18\"}"));
-    jsonArray.add(new JsonObject("{\"merId\":\"8441308517\",\"cntryCd\":\"KINGSTON18\",\"addressLine\":\"try\",\"latd\":\"testing\",\"longtd\":\"testing\",\"regionCd\":\"12123\",\"zip\":\"ABINGDON18\"}"));
-    List<String> updateMerIDs = Arrays.asList("8441308517","8441308518");
-    JsonObject reqPayloadJson = new JsonObject();
-    reqPayloadJson.put("merchantToBeUpdated", jsonArray);
-    reqPayloadJson.put("updatedMerIDsInPrimary", updateMerIDs);
-
-    validate(reqPayloadJson);
-
-
-  }
-
-  static List<Object> validate(JsonObject json)
-  {
-    JsonArray merchantToBeUpdated = json.getJsonArray("merchantToBeUpdated");
-    List updateMerIDs = json.getJsonArray("updatedMerIDsInPrimary").getList();
-    List<Object> merId = merchantToBeUpdated.stream()
-      .filter(e -> updateMerIDs.contains(((JsonObject) e).getString("merId")))
-      .filter(e -> {
-        Set<String> fieldNames = ((JsonObject) e).fieldNames();
-        Predicate<String> addressLine = f -> f.contains("addressLine");
-        return !fieldNames.contains("lat") && !fieldNames.contains("longt") && fieldNames.stream().anyMatch(addressLine) && fieldNames.containsAll(Arrays.asList("cntryCd", "zip", "regionCd"));
-      })
-      .collect(Collectors.toList());
-    System.out.println(merId);
-    return updateMerIDs;
-  }
 }
-
