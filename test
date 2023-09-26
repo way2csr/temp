@@ -29,3 +29,12 @@ public class CTITransferDataRequest {
     private String createdBy;
 
 }
+{
+  "ivrInteractionId": "sampleIvrInteractionId",
+  "acdInteractionId": "sampleAcdInteractionId",
+  "merchantAuthJson": null,
+  "ctiDataJson": null,
+  "targetNLPInteractionId": "sampleTargetNLPInteractionId",
+  "iscCode": "sampleIscCode",
+  "createdBy": "sampleCreatedBy"
+}
