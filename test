@@ -1,211 +1,23 @@
-import com.aexp.sft.config.common.dao.constant.*;
-import com.aexp.sft.config.common.dao.entity.*;
-import com.aexp.sft.config.common.dao.entity.exception.EntExcptMap;
-import com.aexp.sft.config.common.dao.entity.req.Req;
-import com.aexp.sft.config.common.dao.entity.workgrp.*;
-import com.aexp.sft.config.common.util.util.EntryExitLogger;
-import com.aexp.sft.config.workgroup.bean.helper.*;
-import com.aexp.sft.config.workgroup.service.WorkgroupGeneralService;
-import com.aexp.sft.config.workgroup.service.WorkgroupOwnersService;
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import lombok.extern.slf4j.Slf4j;
-import org.junit.jupiter.api.Test;
-import org.mockito.InjectMocks;
-import org.mockito.Mock;
-import org.springframework.boot.test.context.SpringBootTest;
+// Copilot: Generate JUnit tests for the WorkgroupTransDetailServiceImpl class
 
-import java.math.BigInteger;
-import java.time.LocalDateTime;
-import java.util.HashMap;
-import java.util.List;
+// Copilot: Generate JUnit tests for the getTransferProfileWgData method in WorkgroupTransDetailServiceImpl
 
-import static org.junit.jupiter.api.Assertions.*;
-import static org.mockito.Mockito.*;
+// Copilot: Write a JUnit test to verify the retrieval of Central Map Details in getTransferProfileWgData
 
-@SpringBootTest
-class WorkgroupUtilServiceImplTest {
+// Copilot: Write a JUnit test to verify the mapping of Central Map Details in getTransferProfileWgData
 
-    @Mock
-    private ApplUserRepo applUserRepo;
+// Copilot: Write a JUnit test to verify the retrieval of ItsmGrpList Details in getTransferProfileWgData
 
-    @Mock
-    private WgUserAcsReqRepo wgUserAcsReqRepo;
+// Copilot: Write a JUnit test to verify the setting of WorkGrpItsmGrpMapList in getTransferProfileWgData
 
-    @Mock
-    private ReqRepo reqRepo;
+// Copilot: Write JUnit tests for error cases or edge cases in the getTransferProfileWgData method
 
-    @Mock
-    private StatusRepo statusRepo;
+// Copilot: Write JUnit tests to verify the behavior of getTransferProfileWgData with different inputs
 
-    @Mock
-    private WorkgroupRepo workgroupRepo;
+// Copilot: Write tests to cover the log statements in getTransferProfileWgData
 
-    @Mock
-    private FsdbSftUserRepo fsdbSftUserRepo;
+// Copilot: Test the integration with WorkgroupUtilServiceImpl in WorkgroupTransDetailServiceImpl
 
-    @Mock
-    private FsdbRmtAcsRepo fsdbRmtAcsRepo;
+// Copilot: Write tests to verify the behavior of AutoWireRepo in WorkgroupTransDetailServiceImpl
 
-    @Mock
-    private FsdbTransmitterRepo fsdbTransmitterRepo;
-
-    @Mock
-    private FsdbFileNameRepo fsdbFileNameRepo;
-
-    @Mock
-    private WorkgroupGeneralService generalService;
-
-    @Mock
-    private WorkgroupOwnersService ownersService;
-
-    @Mock
-    private ObjectMapper mapper;
-
-    @InjectMocks
-    private WorkgroupUtilServiceImpl workgroupUtilService;
-
-    @Test
-    void testGetWorkgroupEditAccessFlagEnabledWorkgroup() {
-        long wgId = 1L;
-        ApplUser applUser = new ApplUser();
-        WorkgroupMgmtResBeanHelper.WgInfo wgInfo = new WorkgroupMgmtResBeanHelper.WgInfo();
-        wgInfo.setWgGeneralDetails(new WorkgroupMgmtResBeanHelper.WgGeneralDetails());
-        wgInfo.getWgGeneralDetails().setWgStatus("ENABLED");
-        wgInfo.setWgOwnerDetails(new WorkgroupMgmtResBeanHelper.WgOwnerDetails());
-        when(entityUtil.getLoggedInApplUserId()).thenReturn(1L);
-        when(applUserRepo.getById(anyLong())).thenReturn(applUser);
-        when(wgUserAcsReqRepo.getApplUserWgForFsAdminCheck(anyLong())).thenReturn(0);
-        when(wgUserAcsReqRepo.getUserRoleCount(anyList(), anyList(), anyList(), anyLong())).thenReturn(1);
-        when(workgroupRepo.findById(wgId)).thenReturn(Optional.of(new Workgroup()));
-        when(ownersService.getWgOwner(anyLong())).thenReturn(new WorkgroupMgmtResBeanHelper.WgOwnerDetails());
-
-        boolean accessFlag = workgroupUtilService.getWorkgroupEditAccessFlag(wgId, wgInfo);
-
-        assertTrue(accessFlag);
-    }
-
-    @Test
-    void testGetWorkgroupEditAccessFlagPendingApproval() {
-        long wgId = 1L;
-        ApplUser applUser = new ApplUser();
-        WorkgroupMgmtResBeanHelper.WgInfo wgInfo = new WorkgroupMgmtResBeanHelper.WgInfo();
-        wgInfo.setWgGeneralDetails(new WorkgroupMgmtResBeanHelper.WgGeneralDetails());
-        wgInfo.getWgGeneralDetails().setWgStatus("PENDING_APPROVAL");
-        wgInfo.setWgOwnerDetails(new WorkgroupMgmtResBeanHelper.WgOwnerDetails());
-        when(entityUtil.getLoggedInApplUserId()).thenReturn(1L);
-        when(applUserRepo.getById(anyLong())).thenReturn(applUser);
-        when(wgUserAcsReqRepo.getApplUserWgForFsAdminCheck(anyLong())).thenReturn(0);
-
-        boolean accessFlag = workgroupUtilService.getWorkgroupEditAccessFlag(wgId, wgInfo);
-
-        assertFalse(accessFlag);
-    }
-
-    @Test
-    void testCheckIfReqIsPendingApproval() {
-        long wgId = 1L;
-        int reqTypeId = 1;
-        int staId = StatusEnum.PENDING_APPROVAL.getStatusId();
-        when(reqRepo.getReqByWgAndTypeAndSta(anyLong(), anyInt(), anyInt())).thenReturn(Optional.of(new Req()));
-
-        boolean isPending = workgroupUtilService.checkIfReqIsPendingApproval(wgId, reqTypeId);
-
-        assertTrue(isPending);
-    }
-
-    @Test
-    void testGetReqTempDa() {
-        long wgId = 1L;
-        int reqTypeId = 1;
-        int staId = StatusEnum.PENDING_APPROVAL.getStatusId();
-        when(reqRepo.getReqTempDaByWgAndTypeAndSta(anyLong(), anyInt(), anyInt())).thenReturn(Optional.of("tempData"));
-
-        String reqTempDa = workgroupUtilService.getReqTempDa(wgId, reqTypeId);
-
-        assertEquals("tempData", reqTempDa);
-    }
-
-    @Test
-    void testGetLabelIdFromReq() {
-        long wgId = 1L;
-        when(reqRepo.getLabelIdFromReq(anyLong())).thenReturn(123);
-
-        Integer labelId = workgroupUtilService.getLabelIdFromReq(wgId);
-
-        assertEquals(123, labelId);
-    }
-
-    @Test
-    void testReqStatusUpdDb() {
-        long reqId = 1L;
-        int reqStatusId = 2;
-        Req req = new Req();
-        req.setReqId(reqId);
-        Status status = new Status();
-        when(statusRepo.findByStaId(anyInt())).thenReturn(status);
-        when(reqRepo.saveAndFlush(any())).thenReturn(req);
-
-        Req updatedReq = workgroupUtilService.reqStatusUpdDb(reqId, reqStatusId);
-
-        assertEquals(req, updatedReq);
-    }
-
-    @Test
-    void testIsSubscriptionforWG() {
-        long wgId = 1L;
-        when(workgroupRepo.findById(anyLong())).thenReturn(Optional.of(new Workgroup()));
-
-        boolean isSubscription = workgroupUtilService.isSubscriptionforWG(wgId);
-
-        assertFalse(isSubscription);
-    }
-
-    @Test
-    void testGetPendingreq() {
-        long wgId = 1L;
-        int reqTypeId = 1;
-        int staId = StatusEnum.PENDING_APPROVAL.getStatusId();
-        when(reqRepo.findPendingReqs(anyLong(), anyInt(), anyInt())).thenReturn(List.of(new Req()));
-
-        WorkgroupMgmtResBeanHelper.PendingReq pendingReq = workgroupUtilService.getPendingreq(wgId, reqTypeId);
-
-        assertNotNull(pendingReq);
-    }
-
-    @Test
-    void testUpdateUserAndTime() {
-        Workgroup workgroup = new Workgroup();
-        long tpLoginUserId = 1L;
-
-        workgroupUtilService.updateUserAndTime(workgroup, tpLoginUserId);
-
-        assertEquals(tpLoginUserId, workgroup.getLstUpdAppUserId());
-        assertNotNull(workgroup.getLstUpdTS());
-    }
-
-    @Test
-    void testGetSubscriptionWgPendingApprovalData() throws JsonProcessingException {
-        long wgId = 1L;
-        when(mapper.readValue(anyString(), eq(HashMap.class))).thenReturn(new HashMap<>());
-        when(generalService.getWgGeneral(anyLong())).thenReturn(new WorkgroupMgmtResBeanHelper.WgGeneralDetails());
-        when(ownersService.getWgOwner(anyLong())).thenReturn(new WorkgroupMgmtResBeanHelper.WgOwnerDetails());
-
-        String subscriptionWgDetails = workgroupUtilService.getSubscriptionWgPendingApprovalData(wgId);
-
-        assertEquals("NA", subscriptionWgDetails);
-    }
-
-    @Test
-    void testGetOwnerPendingApprovalData() throws JsonProcessingException {
-        long wgId = 1L;
-        when(mapper.readValue(anyString(), eq(HashMap.class))).thenReturn(new HashMap<>());
-
-        String ownerDetails = workgroupUtilService.getOwnerPendingApprovalData(wgId);
-
-        assertEquals("NA", ownerDetails);
-    }
-
-    // Add more test methods as needed for different scenarios.
-
-}
+// Copilot: Write tests to verify the behavior of the TransferProfileWgDtl response bean in getTransferProfileWgData
