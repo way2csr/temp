@@ -1,0 +1,121 @@
+  postgresql:
+    datasource:
+      url: ${POSTGRESQL_URL}
+      username: ${POSTGRESQL_USERNAME}
+      password: ${POSTGRESQL_PASSWORD}
+      driver-class-name: org.postgresql.Driver
+
+  db2:
+    datasource:
+      url: ${DB2_URL}
+      username: ${DB2_USERNAME}
+      password: ${DB2_PASSWORD}
+      driver-class-name: com.ibm.db2.jcc.DB2Driver
+
+
+
+
+package com.fisglobal.ivr.merchantconfig.configuration;
+
+import javax.sql.DataSource;
+
+import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.boot.context.properties.ConfigurationProperties;
+import org.springframework.boot.jdbc.DataSourceBuilder;
+import org.springframework.boot.orm.jpa.EntityManagerFactoryBuilder;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+import org.springframework.context.annotation.Primary;
+import org.springframework.data.jpa.repository.config.EnableJpaRepositories;
+import org.springframework.orm.jpa.JpaTransactionManager;
+import org.springframework.orm.jpa.LocalContainerEntityManagerFactoryBean;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.annotation.EnableTransactionManagement;
+
+import jakarta.persistence.EntityManagerFactory;
+
+
+@Configuration
+@EnableTransactionManagement
+@EnableJpaRepositories(entityManagerFactoryRef = "entityManagerFactory", basePackages = DB2Config.REPOSITORY_PACKAGE)
+public class DB2Config {
+
+    public static final String ENTITY_PACKAGE = "com.fisglobal.ivr.merchantconfig.db2";
+    public static final String REPOSITORY_PACKAGE = "com.fisglobal.ivr.merchantconfig.db2";
+
+    @Primary
+    @Bean(name = "datasource")
+    @ConfigurationProperties(prefix = "spring.db2.datasource")
+    public DataSource dataSource() {
+
+        return DataSourceBuilder.create().build();
+    }
+    @Primary
+    @Bean(name = "entityManagerFactory")
+    public LocalContainerEntityManagerFactoryBean entityManagerFactoryBean(EntityManagerFactoryBuilder builder,
+                                                                           @Qualifier("datasource") DataSource dataSource) {
+
+        return builder.dataSource(dataSource).packages(DB2Config.ENTITY_PACKAGE).build();
+
+    }
+    @Primary
+    @Bean(name = "transactionManager")
+    public PlatformTransactionManager transactionManager(
+            @Qualifier("entityManagerFactory") EntityManagerFactory entityManagerFactory) {
+        return new JpaTransactionManager(entityManagerFactory);
+
+    }
+
+}
+
+
+
+
+import java.util.HashMap;
+import java.util.Map;
+
+import javax.sql.DataSource;
+
+import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.boot.context.properties.ConfigurationProperties;
+import org.springframework.boot.jdbc.DataSourceBuilder;
+import org.springframework.boot.orm.jpa.EntityManagerFactoryBuilder;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+import org.springframework.data.jpa.repository.config.EnableJpaRepositories;
+import org.springframework.orm.jpa.JpaTransactionManager;
+import org.springframework.orm.jpa.LocalContainerEntityManagerFactoryBean;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.annotation.EnableTransactionManagement;
+
+import jakarta.persistence.EntityManagerFactory;
+
+@Configuration
+@EnableTransactionManagement
+@EnableJpaRepositories(entityManagerFactoryRef = "postgresqlEntityManagerFactory", basePackages = PostgreSQLConfig.REPOSITORY_PACKAGE, transactionManagerRef = "postgresqlTransactionManager")
+public class PostgreSQLConfig {
+
+    public static final String ENTITY_PACKAGE = "com.fisglobal.ivr.merchantconfig.postgresql.entity";
+    public static final String REPOSITORY_PACKAGE = "com.fisglobal.ivr.merchantconfig.postgresql.repo";
+
+
+    @Bean(name = "postgresqlDatasource")
+    @ConfigurationProperties(prefix = "spring.postgresql.datasource")
+    public DataSource dataSource() {
+        return DataSourceBuilder.create().build();
+    }
+
+    @Bean(name = "postgresqlEntityManagerFactory")
+    public LocalContainerEntityManagerFactoryBean entityManagerFactoryBean(EntityManagerFactoryBuilder builder, @Qualifier("postgresqlDatasource") DataSource dataSource) {
+        Map<String, Object> properties = new HashMap<>();
+        properties.put("hibernate.dialect", "org.hibernate.dialect.PostgreSQLDialect");
+        return builder.dataSource(dataSource).properties(properties).packages(PostgreSQLConfig.ENTITY_PACKAGE).build();
+
+    }
+
+    @Bean(name = "postgresqlTransactionManager")
+    public PlatformTransactionManager transactionManager(@Qualifier("postgresqlEntityManagerFactory") EntityManagerFactory entityManagerFactory) {
+        return new JpaTransactionManager(entityManagerFactory);
+
+    }
+}
